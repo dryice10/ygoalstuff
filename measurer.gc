@@ -1,0 +1,85 @@
+;;-*-Lisp-*-
+(in-package goal)
+
+#|
+A small process used for measuring distance in game (in meters).
+
+Use measure-1 to spawn the process. Use measure-kill to kill.
+Measure-1 stores Jak's current position and marks it with a ball. 
+Text on screen measures the xz-distance and y-distance between the saved point and Jak.
+
+Only 1 point is saved at a time.
+Currently you can spawn the process multiple times, which duplicates the text and updates the ball.
+Using measure-kill does kill all instances of measure-1.
+Lines with multiple semi-colons means I didn't want to touch it.
+|#
+
+
+;;;yeah idk
+(define *measure-handle* (new 'static 'handle))
+(set! *measure-handle* (the handle #f))
+
+
+(defun-debug measure-1 ()
+  "Pos is stored in the balls"
+  ;;;(if (not (handle->process *measure-handle*))
+    (let ((meas-proc
+      ;process-spawn-function, spawns a process that runs the function you give it
+      (process-spawn-function process :name 'measure-proc
+        ;This lambda is our function
+        (lambda :behavior process ()
+          (stack-size-set! (-> self main-thread) 256)
+        ;Initialize some variables 
+        ;Code before the loop runs once on process spawn
+          (define xyz-dist 0.0)
+          (define  xz-dist 0.0)
+          (define   y-dist 0.0)
+        ;bcolor is the color of the larger balls, you can set this while in-game
+          (define bcolor *color-dark-blue*)
+        ;Save Jak's xyz position to j-vec
+          (define j-vec (new 'static 'vector))
+          (set! (-> j-vec x) (-> (target-pos 0) x))
+          (set! (-> j-vec y) (-> (target-pos 0) y))
+          (set! (-> j-vec z) (-> (target-pos 0) z))
+
+        ;Loop runs once per frame while process is active
+          (loop
+            ;Calculate the distances between j-vec and Jak's live position
+            (set! xyz-dist (vector-vector-distance j-vec (target-pos 0)) )
+            (set!  xz-dist (vector-vector-xz-distance j-vec (target-pos 0)) )
+            (set!   y-dist (- (-> (target-pos 0) y) (-> j-vec y)) )
+
+            ;Display distance as text on screen
+            (format *stdcon* "~%XZ-Dist: ~M ~% Y-Dist: ~M ~%" xz-dist y-dist)
+
+            ;Draw balls
+            (add-debug-sphere #t (bucket-id debug) j-vec (meters 0.1) *color-red*)
+            (add-debug-sphere #t (bucket-id debug) j-vec (meters 0.5) bcolor)
+            
+            ;Draw bigger ball if Jak has moved far enough
+            (if (> xyz-dist (meters 30.0)) 
+                (add-debug-sphere #t (bucket-id debug) j-vec (meters 5.0) bcolor)
+            )
+
+            ;;Processes should suspend themselves, the loop will resume next frame
+            (suspend)
+            )
+          )
+        )
+      ))
+      ;;;yeah idk
+      (set! *measure-handle* (ppointer->handle meas-proc))
+      
+      ;Lisp returns the last form as the function return
+      (none)
+      )
+    ;;; else
+    ;;;(format #t "balls are already being displayed")
+    ;;;)
+  )
+
+
+(defun-debug measure-kill ()
+  "Kill the measure-1 process"
+  (kill-by-name 'measure-proc *active-pool*)
+  )
