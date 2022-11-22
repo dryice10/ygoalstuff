@@ -1,0 +1,83 @@
+;;-*-Lisp-*-
+(in-package goal)
+
+#|
+Run (checked-1) to turn on and (checked-kill) to turn off.
+Some text display to help with Lava Tube Skip practice. 
+
+A message for if you have idled to store Lava Tube as backup level
+One message tells you whether you still have a Village3 checkpoint after bypass.
+Another tells you if Jak is close enough to lavatube-middle to idle deload.
+|#
+
+(defun-debug checked-1 ()
+  "Pos is stored in the balls"
+
+    (let ((checked-proc
+      ;process-spawn-function, spawns a process that runs the function you give it
+      (process-spawn-function process :name 'checked-proc
+        ;This lambda is our function
+        (lambda :behavior process ()
+          (stack-size-set! (-> self main-thread) 64)
+          
+          ;Code before the loop runs once on process spawn
+          
+          ;Initialize some variables
+          (define tubemid-dist 0.0)
+          (define tubestart-dist 0.0)
+
+          ;Loop runs once per frame while process is active
+          (loop
+            
+            ;Calculate the distances
+            (set! tubemid-dist (vector-vector-distance (-> (get-continue-by-name *game-info* "lavatube-middle") trans) (target-pos 0)))
+            (set! tubestart-dist (vector-vector-distance (-> (get-continue-by-name *game-info* "lavatube-start") trans) (target-pos 0)))
+
+            ;Start a bucket thing block
+            (with-dma-buffer-add-bucket ((testbuf (-> (current-frame) debug-buf)) (bucket-id debug-no-zbuf))
+              ;Text for storing Lava Tube
+              (if (= (-> *backup-load-state* vis-nick) 'lav)
+                (draw-string-xy (string-format "Lava Tube stored as backup") testbuf 10 30 (font-color green) (font-flags shadow kerning))
+                (draw-string-xy (string-format "Lava Tube not stored") testbuf 10 30 (font-color red) (font-flags shadow kerning))
+              )
+
+              ;Text for checkpoint after Bypass
+              (if (= (-> *game-info* current-continue level) 'village3)
+                (draw-string-xy (string-format "Volcanic Crater checkpoint") testbuf 10 40 (font-color green) (font-flags shadow kerning))
+                (draw-string-xy (string-format "Got Lava Tube checkpoint") testbuf 10 40 (font-color red-orange) (font-flags shadow kerning))
+              )
+              ;Text if you are close enough to lavatube-middle to Idle Deload
+              (if (in-bubble? 1763.85 22.78 -3389.8 6.0) ;we can in-bubble any of these
+                (if (< tubemid-dist tubestart-dist)
+                  (draw-string-xy (string-format "Safe to deload!") testbuf 12 50 (font-color green) (font-flags shadow kerning))
+                  (draw-string-xy (string-format "Too far from lavatube-middle") testbuf 10 50 (font-color red) (font-flags shadow kerning))
+                )
+              )
+            )
+            
+            ;Other stuff I was looking at
+            ;(format *stdcon* "tubestart: ~m ~%tubemiddle: ~m" tubestart-dist tubemid-dist)   ;distances
+            ;(format *stdcon* "~%continue: ~s" (-> *game-info* current-continue))
+            ;(format *stdcon* "~%backup: ~s" (-> *backup-load-state* vis-nick))
+
+            ;Draw balls on checkpoint locations
+            ;(add-debug-sphere #t (bucket-id debug-no-zbuf) (-> (get-continue-by-name *game-info* "lavatube-start") trans) (meters 45.0) *color-red*)
+            ;(add-debug-sphere #t (bucket-id debug-no-zbuf) (-> (get-continue-by-name *game-info* "lavatube-middle") trans) (meters 45.0) *color-blue*)
+
+            ;;Processes should suspend themselves, the loop will resume next frame
+            (suspend)
+          )
+        )
+      )
+      ))
+
+      ;Lisp returns the last form as the function return
+      (none)
+      )
+  )
+
+
+(defun-debug checked-kill ()
+  "Kill the tubed process"
+  (kill-by-name 'checked-proc *active-pool*)
+  )
