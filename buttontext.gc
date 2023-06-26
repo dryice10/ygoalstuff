@@ -1,0 +1,119 @@
+;;-*-Lisp-*-
+(in-package goal)
+
+#|
+An input display written in GOAL
+
+Before I overengineered it a bunch
+
+This one has fewer features but is easier to follow
+
+|#
+
+
+(defun button-1 ()
+  ;process-spawn-function, spawns a process that runs the function you give it
+  (process-spawn-function process :name 'button-proc
+    ;This lambda is our function
+    (lambda :behavior process ()
+    ;Code before the loop runs once on process spawn
+    
+    ;setup variables for stick
+    (define stick-origin-x 10)
+    (define stick-origin-y 210)
+    ;no idea how the draw scaling works, this seems good enough
+    (define height-idk (/ 128 5))
+    (define width-idk (/ 128 3))
+
+;;;;82, 208 current button center
+    (define button-origin-x 82)
+    (define button-origin-y 208)
+    
+
+
+    ;
+    ;Loop runs once per frame while process is active
+      (loop
+      ;Start a bucket thing block
+        (with-dma-buffer-add-bucket ((testbuf (-> (current-frame) debug-buf)) (bucket-id debug-no-zbuf))
+          (when (cpad-hold? 0 triangle)
+              (draw-string-xy (lookup-text! *common-text* (text-id pad-triangle) #f) testbuf 70 190 (font-color green) (font-flags shadow kerning large) ))
+
+          (when (cpad-hold? 0 circle)
+              (draw-string-xy (lookup-text! *common-text* (text-id pad-circle) #f) testbuf 88 200 (font-color green) (font-flags shadow kerning large) ))
+
+          (when (cpad-hold? 0 x)
+              (draw-string-xy (lookup-text! *common-text* (text-id pad-x) #f) testbuf 70 210 (font-color green) (font-flags shadow kerning large) ))
+        
+          (when (cpad-hold? 0 square)
+              (draw-string-xy (lookup-text! *common-text* (text-id pad-square) #f) testbuf 52 200 (font-color green) (font-flags shadow kerning large) ))
+          
+          (when (cpad-hold? 0 r2)
+              (draw-string-xy "R2" testbuf 95 185 (the font-color 13) (font-flags shadow kerning ) ))
+
+          (when (cpad-hold? 0 r1)
+              (draw-string-xy "R1" testbuf 95 192 (the font-color 13) (font-flags shadow kerning ) ))
+          
+          (when (cpad-hold? 0 l2)
+              (draw-string-xy "L2" testbuf 54 185 (the font-color 13) (font-flags shadow kerning ) ))
+              
+          (when (cpad-hold? 0 l1)
+              (draw-string-xy "L1" testbuf 54 192 (the font-color 13) (font-flags shadow kerning ) ))
+
+          (when (cpad-hold? 0 r3)
+              (draw-string-xy "R3" testbuf 95 215 (the font-color 13) (font-flags shadow kerning ) ))
+
+          (when (cpad-hold? 0 l3)
+              (draw-string-xy "L3" testbuf 54 215 (the font-color 13) (font-flags shadow kerning ) ))
+
+          ;Text display for joysticks
+          (draw-string-xy-scaled (string-format "~d  ~d" (-> *cpad-list* cpads 0 leftx) (-> *cpad-list* cpads 0 lefty)) testbuf 10 190 (font-color green) (font-flags shadow kerning ) 0.75)
+          
+          ;draw-sprite2d-xy buf x y w h color
+          ;up/down axis
+          (draw-sprite2d-xy testbuf 
+            (+ stick-origin-x (/ width-idk 2))
+            (- stick-origin-y (/ height-idk 2))
+            2
+            height-idk
+            *color-red*)
+          ;left/right axis
+          (draw-sprite2d-xy testbuf 
+            stick-origin-x
+            stick-origin-y
+            width-idk 
+            1 
+            *color-blue*)
+          
+          ;stick locaiton
+          (draw-sprite2d-xy testbuf 
+            ;analog-input takes left stick x int value and maps its min/max to negative/positive of the last argument 
+            ;in our case we scale to half of the picture's width, so the stick can go full + (right) or full - (left)
+            (+ (+ stick-origin-x (/ width-idk 2))
+              (the int (analog-input (the int (-> *cpad-list* cpads 0 leftx)) 128.0 0.0 128.0 (the float (/ width-idk 2)))))
+            ;repeat for y coordinate
+            (+ stick-origin-y
+              (the int (analog-input (the int (-> *cpad-list* cpads 0 lefty)) 128.0 0.0 128.0 (the float (/ height-idk 2)))))
+            3 
+            2 
+            *color-red*)
+
+          ;raw stick location, nice for locating screen coordinates
+          (draw-sprite2d-xy testbuf (the int (-> *cpad-list* cpads 0 leftx)) (the int(-> *cpad-list* cpads 0 lefty)) 2 2 *color-red*)
+
+        )
+      ;;Processes should suspend themselves, the loop will resume next frame
+      (suspend)
+      )
+    )
+  )
+    
+;Lisp returns the last form as the function return
+(none)
+)
+
+
+(defun button-kill ()
+  "Kill the button process"
+  (kill-by-name 'button-proc *active-pool*)
+  )
