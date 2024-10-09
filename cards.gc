@@ -1,0 +1,402 @@
+(defun draw-string-xy-scaled ((str string) (buf dma-buffer) (x int) (y int) (color font-color) (flags font-flags) (scale float))
+  "Draw a string at the given xy location, with the given scale."
+  (let* ((font-ctxt (new 'stack 'font-context *font-default-matrix* x y 0.0 color flags)))
+         (set! (-> font-ctxt scale) scale)
+    (draw-string str buf font-ctxt)
+    
+    )
+  (none))
+
+;;given a stick direction, return 0-7
+(defun stick-dir-to-8 ((dir float))
+  ;;right side is negative, add full rot to make it positive
+  (when (> 0.0 dir)
+    (+! dir DEGREES_PER_ROT)
+  )
+  (/! dir (/ DEGREES_PER_ROT 8.0)) ;;8192 ;gets 1/8 of a rotation instead of 1/6565536
+  ;;(format #t "rot ~f " dir)
+  ;;shift by .5 and take the ceiling to get an int 0-8
+  (-! dir 0.5)
+  (set! dir (ceil dir))
+  
+  ;;(format #t "rot ~d" (mod (the int dir) 8))
+  (mod (the int dir) 8)
+)
+
+;;given a stick speed, return 0-2
+(defun stick-speed-to-3 ((speed float))
+  (cond
+    ((<= speed STICK_DEADZONE)
+      0)
+    ((<= speed (+ STICK_DEADZONE (/ (- 1.0 STICK_DEADZONE) 2.0))) ;;0.65
+      1)
+    (else
+      2)
+  )
+)
+
+
+(deftype card (basic)
+  ((timestamp time-frame)
+   (msg string)
+   (dir int)
+   (vel int)
+  )
+  (:methods
+    (new (symbol type string) _type_)
+  )
+)
+#|
+(defmethod new card ((allocation symbol) (type-to-make type) (arg0 string))
+  (let ((v0-0 (object-new allocation type-to-make (the-as int (-> type-to-make size)))))
+    (set! (-> v0-0 timestamp) (get-current-time))
+    (set! (-> v0-0 msg) arg0)
+    v0-0
+    )
+  )
+|#
+
+(deftype card-array (inline-array-class)
+  ((data card :inline :dynamic)
+  )
+)
+
+(set! (-> card-array heap-base) (the uint 64))
+
+(deftype card-display (process)
+  ((x-start int)
+   (y-start int)
+   (text-offset int)
+   (include-stick? symbol)
+   (cards card-array)
+   (new-input? symbol)
+   (current-buttons pad-buttons)
+   (current-dir int)
+   (current-vel int)
+   )
+  (:state-methods
+    active
+    )
+  (:methods
+    (relocate (_type_ int) _type_)
+    (update-card-msg (card-display card string) card)
+    (update-card-time (card-display card time-frame) card)
+    (update-card-dir (card-display card int) card)
+    (update-card-vel (card-display card int) card)
+      
+    (shift-cards-down (card-display) none)
+    (update-card-all (card-display) none)
+    (calc-frames (card-display int) int)
+    (make-button-string (card-display pad-buttons) string)
+    )
+)
+
+;;hat
+(defmethod relocate ((this card-display) (offset int))
+  (if (nonzero? (-> this cards))
+      (&+! (-> this cards) offset)
+      )
+  (call-parent-method this offset)
+  )
+
+
+(defmethod update-card-msg ((this card-display) (c card) (arg0 string))
+    (set! (-> c msg) arg0)
+    c
+  )
+
+(defmethod update-card-time ((this card-display) (c card) (arg0 time-frame))
+    (set! (-> c timestamp) arg0)
+    c
+  )
+
+(defmethod update-card-dir ((this card-display) (c card) (arg0 int))
+    (set! (-> c dir) arg0)
+    c
+  )
+
+(defmethod update-card-vel ((this card-display) (c card) (arg0 int))
+    (set! (-> c vel) arg0)
+    c
+  )
+
+(defmethod update-card-all ((this card-display))
+  (update-card-msg this (-> this cards data 0) 
+    (make-button-string this (-> this current-buttons)))
+  (update-card-time this (-> this cards data 0) (get-current-time))
+  (update-card-dir this (-> this cards data 0) (-> this current-dir))
+  (update-card-vel this (-> this cards data 0) (-> this current-vel))
+  (none)
+)
+
+(defmethod shift-cards-down ((this card-display))
+  (countdown (i (- (-> this cards length) 1))
+    (update-card-msg this (-> this cards data (+ 1 i)) (-> this cards data i msg))
+    (update-card-time this (-> this cards data (+ 1 i)) (-> this cards data i timestamp))
+    (update-card-dir this (-> this cards data (+ 1 i)) (-> this cards data i dir))
+    (update-card-vel this (-> this cards data (+ 1 i)) (-> this cards data i vel))
+  )
+  (none)
+)
+
+(defun vec-for-stick ((dir int) (vel int))
+  (let ((ret-vec (static-vector 0.0 0.0 0.0 0.0)))
+  (when (= dir 0)
+    (set-vector! ret-vec 7.0 -1.0 0.0 0.0)
+  )
+  (when (= dir 1)
+    (set-vector! ret-vec 5.0 1.0 0.0 0.0)
+  )
+  (when (= dir 2)
+    (set-vector! ret-vec 4.0 4.0 0.0 0.0)
+  )
+  (when (= dir 3)
+    (set-vector! ret-vec 5.0 7.0 0.0 0.0)
+  )
+  (when (= dir 4)
+    (set-vector! ret-vec 7.0 9.0 0.0 0.0)
+  )
+  (when (= dir 5)
+    (set-vector! ret-vec 9.0 7.0 0.0 0.0)
+  )
+  (when (= dir 6)
+    (set-vector! ret-vec 11.0 4.0 0.0 0.0)
+  )
+  (when (= dir 7)
+    (set-vector! ret-vec 9.0 1.0 0.0 0.0)
+  )
+
+  (when (= vel 0)
+    (set-vector! ret-vec 7.0 4.0 0.0 0.0)
+  )
+  ret-vec
+  )
+)
+
+
+(defmethod calc-frames ((this card-display) (i int))
+  ;;subtracts the given card slot's timestamp from the previous
+  ;;if i = 0, use current time
+  ;;min 99 to cap for printing
+  (min
+  (the int (/ 
+    (- 
+      (if (= 0 i) (get-current-time) (-> this cards data (- i 1) timestamp))
+      (-> this cards data i timestamp))
+   5))
+  99)
+)
+
+
+(define MAX_CARDS 20)
+
+(defbehavior card-display-init-by-other card-display ()
+  ;;set initial values and cards
+  (set! (-> self x-start) 22)
+  (set! (-> self y-start) 10)
+  (set! (-> self text-offset) 15)
+  (set! (-> self include-stick?) #t)
+  (set! (-> self new-input?) #f)
+  (set! (-> self current-buttons) (the pad-buttons 0))
+  (set! (-> self current-dir) 0)
+  (set! (-> self current-vel) 0)
+  
+  (set! (-> self cards) (new 'process 'card-array MAX_CARDS))
+  ;;setup dummy cards in slots
+  (dotimes (i (-> self cards length))
+    (update-card-msg self (-> self cards data i) "")
+    (update-card-time self (-> self cards data i) 0)
+    (update-card-dir self (-> self cards data i) 0)
+    (update-card-vel self (-> self cards data i) 0)
+  )
+  (go-virtual active)
+)
+
+
+(defbehavior draw-text card-display ()
+  (with-dma-buffer-add-bucket ((testbuf (-> (current-frame) global-buf)) (bucket-id debug-no-zbuf1))
+    (dotimes (i (-> self cards length))
+      (when (> (-> self cards data i timestamp) 0)
+        ;;draw background rectangle
+        (draw-sprite2d-xy testbuf 
+        (- (-> self x-start) 20)
+        (- (+ (-> self y-start) (* i (-> self text-offset))) 0)
+        80
+        16
+        (new 'static 'rgba :b #x80 :a 40)
+        )
+        ;;draw the frame difference
+        (draw-string-xy-scaled (string-format "~2,`0`d" (calc-frames self i))
+          testbuf
+          (- (-> self x-start) 2)
+          (+ 2 (-> self y-start) (* i (-> self text-offset)))
+          (the font-color 0)
+          (font-flags large right shadow kerning)
+          0.4
+        )
+        ;;stick pic
+        (draw-string-xy-scaled
+          (string-format "O")
+          testbuf 
+          (+ (-> self x-start) 7)
+          (- (+ (-> self y-start) (* i (-> self text-offset))) 1)
+          (the font-color 22)
+          (font-flags large kerning)
+          0.6
+        )
+        (let ((vec (vec-for-stick (-> self cards data i dir) (-> self cards data i vel))))
+          (draw-string-xy-scaled
+            (string-format " <" ) ;;< converts to a filled in circle
+            testbuf 
+            (+ (the int (-> vec x)) (-> self x-start))
+            (+ (the int (-> vec y)) (-> self y-start) (* i (-> self text-offset)))
+            (the font-color (- 5 (-> self cards data i vel)))
+            (font-flags large kerning)
+            0.25
+          )
+        )
+        ;;draw the message (and an L for a divider)
+        (draw-string-xy-scaled
+          (string-format "l   ~s" (-> self cards data i msg))
+          testbuf 
+          (-> self x-start)
+          (+ (-> self y-start) (* i (-> self text-offset)))
+          (the font-color 0)
+          (font-flags large shadow kerning)
+          0.5
+        )
+      )
+    )
+  )
+  (none)
+)
+
+(defbehavior check-button-input card-display ()
+  (when (!= (the pad-buttons (-> *cpad-list* cpads 0 button0)) (-> self current-buttons))
+    (set! (-> self current-buttons) (the pad-buttons (-> *cpad-list* cpads 0 button0)))
+    (set! (-> self new-input?) #t)
+    ;;(format #t "buttons: ~d" (-> self current-buttons))
+  )
+  (none)
+)
+
+(defbehavior check-stick-input card-display ()
+  (let ((speed3 (stick-speed-to-3 (-> *cpad-list* cpads 0 stick0-speed))))
+    (when (!= speed3 (-> self current-vel))
+      (set! (-> self current-vel) speed3)
+      (set! (-> self new-input?) #t)
+      ;;(format #t "speed: ~d" (-> self current-vel))
+    )
+  )
+  (when (!= 0 (-> self current-vel)) 
+    (let ((dir8 (stick-dir-to-8 (-> *cpad-list* cpads 0 stick0-dir))))
+      (when (!= dir8 (-> self current-dir))
+        (set! (-> self current-dir) dir8)
+        (set! (-> self new-input?) #t)
+        ;;(format #t "dir: ~d vel: ~d" (-> self current-dir) (-> self current-vel))
+      )
+    )
+  )
+  (none)
+)
+
+
+(defstate active (card-display)
+  :virtual #t
+  :code (behavior ()
+    (loop
+
+      (draw-text)
+      (check-button-input)
+      (when (-> self include-stick?)
+        (check-stick-input)
+      )
+      ;;if any inputs are new, make a new card
+      (when (-> self new-input?)
+        (shift-cards-down self)
+        (update-card-all self)
+        (set! (-> self new-input?) #f)
+      )
+
+      ;;maybe scale the dpad down with another draw too
+
+    (suspend))
+    )
+  )
+
+(defun card-display-on ()
+  ;;(set! *masher-on?* #t)
+  (process-spawn card-display)
+  (none)
+)
+
+(defun card-display-off ()
+  "Kill the process"
+  ;;(set! *masher-on?* #f)
+  (kill-by-name "card-display" *active-pool*)
+  )
+
+
+
+(defmethod make-button-string ((this card-display) (but pad-buttons))
+  (let ((but-str (new 'global 'string 512 (the string #f))) ;;this is where it crashes
+        (encoded-but-str (new 'global 'string 1024 (the string #f))))
+    (clear but-str)
+    (clear encoded-but-str)
+    (when (logtest? but (pad-buttons l3))
+      (cat-string<-string but-str "~22L<~-30H~0LL3")
+    )
+    (when (logtest? but (pad-buttons r3))
+      (cat-string<-string but-str "~22L<~-30H~0LR3")
+    )
+    (when (logtest? but (pad-buttons select))
+      (cat-string<-string but-str "Sel")
+    )
+    (when (logtest? but (pad-buttons start))
+      (cat-string<-string but-str "St")
+    )
+    (when (logtest? but (pad-buttons up))
+      (cat-string<-string but-str "<PAD_DPAD_UP>")
+    )
+    (when (logtest? but (pad-buttons up))
+      (cat-string<-string but-str "<PAD_DPAD_UP>")
+    )
+    (when (logtest? but (pad-buttons right))  ;;bring your own string
+      (cat-string<-string but-str "~Y~22L<PAD_PART_DPAD_L>~Z~22L~+17H~-13V<PAD_PART_DPAD_U>~Z~22L~+17H~+14V<PAD_PART_DPAD_D>~Z~3L~+32H<PAD_PART_DPAD_R>~Z~+56H")
+    )
+    (when (logtest? but (pad-buttons down)) ;;bring your own string
+      (cat-string<-string but-str "~Y~22L<PAD_PART_DPAD_L>~Z~22L~+17H~-13V<PAD_PART_DPAD_U>~Z~3L~+17H~+14V<PAD_PART_DPAD_D>~Z~22L~+32H<PAD_PART_DPAD_R>~Z~+56H")
+    )
+    (when (logtest? but (pad-buttons left))   ;;bring your own string
+      (cat-string<-string but-str "~Y~3L<PAD_PART_DPAD_L>~Z~22L~+17H~-13V<PAD_PART_DPAD_U>~Z~22L~+17H~+14V<PAD_PART_DPAD_D>~Z~22L~+32H<PAD_PART_DPAD_R>~Z~+56H")
+    )
+    (when (logtest? but (pad-buttons l2))
+      (cat-string<-string but-str "<PAD_L2>")
+    )
+    (when (logtest? but (pad-buttons r2)) ;;<PAD_R2>
+      (cat-string<-string but-str "<PAD_R2>")
+    )
+    (when (logtest? but (pad-buttons l1))
+      (cat-string<-string but-str "<PAD_L1>")
+    )
+    (when (logtest? but (pad-buttons r1))
+      (cat-string<-string but-str "<PAD_R1>")
+    )
+    (when (logtest? but (pad-buttons triangle))
+      (cat-string<-string but-str "<PAD_TRIANGLE>")
+    )
+    (when (logtest? but (pad-buttons circle))
+      (cat-string<-string but-str "<PAD_CIRCLE>")
+    )
+    (when (logtest? but (pad-buttons x))
+      (cat-string<-string but-str "<PAD_X>")
+    )
+    (when (logtest? but (pad-buttons square))
+      (cat-string<-string but-str "<PAD_SQUARE>")
+    )
+  (pc-encode-utf8-string but-str encoded-but-str)
+  encoded-but-str
+  )
+)
+
+(card-display-on)
