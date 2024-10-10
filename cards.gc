@@ -207,7 +207,7 @@
   (set! (-> self cards) (new 'process 'card-array MAX_CARDS))
   ;;setup dummy cards in slots
   (dotimes (i (-> self cards length))
-    (update-card-msg self (-> self cards data i) "")
+    (update-card-msg self (-> self cards data i) (the string #f))
     (update-card-time self (-> self cards data i) 0)
     (update-card-dir self (-> self cards data i) 0)
     (update-card-vel self (-> self cards data i) 0)
