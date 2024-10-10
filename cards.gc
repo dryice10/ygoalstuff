@@ -42,19 +42,9 @@
    (dir int)
    (vel int)
   )
-  (:methods
-    (new (symbol type string) _type_)
-  )
 )
-#|
-(defmethod new card ((allocation symbol) (type-to-make type) (arg0 string))
-  (let ((v0-0 (object-new allocation type-to-make (the-as int (-> type-to-make size)))))
-    (set! (-> v0-0 timestamp) (get-current-time))
-    (set! (-> v0-0 msg) arg0)
-    v0-0
-    )
-  )
-|#
+
+
 
 (deftype card-array (inline-array-class)
   ((data card :inline :dynamic)
@@ -73,6 +63,9 @@
    (current-buttons pad-buttons)
    (current-dir int)
    (current-vel int)
+   
+   (temp-but-string string)
+   (temp-encoded-string string)
    )
   (:state-methods
     active
@@ -85,7 +78,7 @@
     (update-card-vel (card-display card int) card)
       
     (shift-cards-down (card-display) none)
-    (update-card-all (card-display) none)
+    (update-top-card (card-display) none)
     (calc-frames (card-display int) int)
     (make-button-string (card-display pad-buttons) string)
     )
@@ -93,6 +86,12 @@
 
 ;;hat
 (defmethod relocate ((this card-display) (offset int))
+  (if (nonzero? (-> this temp-encoded-string))
+      (&+! (-> this temp-encoded-string) offset)
+      )
+  (if (nonzero? (-> this temp-but-string))
+      (&+! (-> this temp-but-string) offset)
+      )
   (if (nonzero? (-> this cards))
       (&+! (-> this cards) offset)
       )
@@ -120,7 +119,7 @@
     c
   )
 
-(defmethod update-card-all ((this card-display))
+(defmethod update-top-card ((this card-display))
   (update-card-msg this (-> this cards data 0) 
     (make-button-string this (-> this current-buttons)))
   (update-card-time this (-> this cards data 0) (get-current-time))
@@ -131,7 +130,7 @@
 
 (defmethod shift-cards-down ((this card-display))
   (countdown (i (- (-> this cards length) 1))
-    (update-card-msg this (-> this cards data (+ 1 i)) (-> this cards data i msg))
+    (update-card-msg this (-> this cards data (+ 1 i)) (the string (-> this cards data i msg)))
     (update-card-time this (-> this cards data (+ 1 i)) (-> this cards data i timestamp))
     (update-card-dir this (-> this cards data (+ 1 i)) (-> this cards data i dir))
     (update-card-vel this (-> this cards data (+ 1 i)) (-> this cards data i vel))
@@ -200,7 +199,11 @@
   (set! (-> self current-buttons) (the pad-buttons 0))
   (set! (-> self current-dir) 0)
   (set! (-> self current-vel) 0)
-  
+
+
+  (set! (-> self temp-but-string) (new 'process 'string 512 (the string #f)))
+  (set! (-> self temp-encoded-string) (new 'process 'string 1024 (the string #f)))
+
   (set! (-> self cards) (new 'process 'card-array MAX_CARDS))
   ;;setup dummy cards in slots
   (dotimes (i (-> self cards length))
@@ -314,7 +317,7 @@
       ;;if any inputs are new, make a new card
       (when (-> self new-input?)
         (shift-cards-down self)
-        (update-card-all self)
+        (update-top-card self)
         (set! (-> self new-input?) #f)
       )
 
@@ -336,67 +339,67 @@
   (kill-by-name "card-display" *active-pool*)
   )
 
+(define g1 (new 'global 'string 512 (the string #f)))
+(define g2 (new 'global 'string 1024 (the string #f)))
 
 
 (defmethod make-button-string ((this card-display) (but pad-buttons))
-  (let ((but-str (new 'global 'string 512 (the string #f))) ;;this is where it crashes
-        (encoded-but-str (new 'global 'string 1024 (the string #f))))
-    (clear but-str)
-    (clear encoded-but-str)
+  
+    (clear (-> this temp-but-string))
+    (clear (-> this temp-encoded-string))
+    (clear g1)
+    (clear g2)
+
+    (when (logtest? but (pad-buttons select))
+      (cat-string<-string (-> this temp-but-string) "Sel")
+    )
     (when (logtest? but (pad-buttons l3))
-      (cat-string<-string but-str "~22L<~-30H~0LL3")
+      (cat-string<-string (-> this temp-but-string) "~22L<~-30H~0LL3")
     )
     (when (logtest? but (pad-buttons r3))
-      (cat-string<-string but-str "~22L<~-30H~0LR3")
-    )
-    (when (logtest? but (pad-buttons select))
-      (cat-string<-string but-str "Sel")
+      (cat-string<-string (-> this temp-but-string) "~22L<~-30H~0LR3")
     )
     (when (logtest? but (pad-buttons start))
-      (cat-string<-string but-str "St")
+      (cat-string<-string (-> this temp-but-string) "St")
     )
     (when (logtest? but (pad-buttons up))
-      (cat-string<-string but-str "<PAD_DPAD_UP>")
-    )
-    (when (logtest? but (pad-buttons up))
-      (cat-string<-string but-str "<PAD_DPAD_UP>")
+      (cat-string<-string (-> this temp-but-string) "<PAD_DPAD_UP>")
     )
     (when (logtest? but (pad-buttons right))  ;;bring your own string
-      (cat-string<-string but-str "~Y~22L<PAD_PART_DPAD_L>~Z~22L~+17H~-13V<PAD_PART_DPAD_U>~Z~22L~+17H~+14V<PAD_PART_DPAD_D>~Z~3L~+32H<PAD_PART_DPAD_R>~Z~+56H")
+      (cat-string<-string (-> this temp-but-string) "~Y~22L<PAD_PART_DPAD_L>~Z~22L~+17H~-13V<PAD_PART_DPAD_U>~Z~22L~+17H~+14V<PAD_PART_DPAD_D>~Z~3L~+32H<PAD_PART_DPAD_R>~Z~+56H")
     )
     (when (logtest? but (pad-buttons down)) ;;bring your own string
-      (cat-string<-string but-str "~Y~22L<PAD_PART_DPAD_L>~Z~22L~+17H~-13V<PAD_PART_DPAD_U>~Z~3L~+17H~+14V<PAD_PART_DPAD_D>~Z~22L~+32H<PAD_PART_DPAD_R>~Z~+56H")
+      (cat-string<-string (-> this temp-but-string) "~Y~22L<PAD_PART_DPAD_L>~Z~22L~+17H~-13V<PAD_PART_DPAD_U>~Z~3L~+17H~+14V<PAD_PART_DPAD_D>~Z~22L~+32H<PAD_PART_DPAD_R>~Z~+56H")
     )
     (when (logtest? but (pad-buttons left))   ;;bring your own string
-      (cat-string<-string but-str "~Y~3L<PAD_PART_DPAD_L>~Z~22L~+17H~-13V<PAD_PART_DPAD_U>~Z~22L~+17H~+14V<PAD_PART_DPAD_D>~Z~22L~+32H<PAD_PART_DPAD_R>~Z~+56H")
+      (cat-string<-string (-> this temp-but-string) "~Y~3L<PAD_PART_DPAD_L>~Z~22L~+17H~-13V<PAD_PART_DPAD_U>~Z~22L~+17H~+14V<PAD_PART_DPAD_D>~Z~22L~+32H<PAD_PART_DPAD_R>~Z~+56H")
     )
     (when (logtest? but (pad-buttons l2))
-      (cat-string<-string but-str "<PAD_L2>")
+      (cat-string<-string (-> this temp-but-string) "<PAD_L2>")
     )
     (when (logtest? but (pad-buttons r2)) ;;<PAD_R2>
-      (cat-string<-string but-str "<PAD_R2>")
+      (cat-string<-string (-> this temp-but-string) "<PAD_R2>")
     )
     (when (logtest? but (pad-buttons l1))
-      (cat-string<-string but-str "<PAD_L1>")
+      (cat-string<-string (-> this temp-but-string) "<PAD_L1>")
     )
     (when (logtest? but (pad-buttons r1))
-      (cat-string<-string but-str "<PAD_R1>")
+      (cat-string<-string (-> this temp-but-string) "<PAD_R1>")
     )
     (when (logtest? but (pad-buttons triangle))
-      (cat-string<-string but-str "<PAD_TRIANGLE>")
+      (cat-string<-string (-> this temp-but-string) "<PAD_TRIANGLE>")
     )
     (when (logtest? but (pad-buttons circle))
-      (cat-string<-string but-str "<PAD_CIRCLE>")
+      (cat-string<-string (-> this temp-but-string) "<PAD_CIRCLE>")
     )
     (when (logtest? but (pad-buttons x))
-      (cat-string<-string but-str "<PAD_X>")
+      (cat-string<-string (-> this temp-but-string) "<PAD_X>")
     )
     (when (logtest? but (pad-buttons square))
-      (cat-string<-string but-str "<PAD_SQUARE>")
+      (cat-string<-string (-> this temp-but-string) "<PAD_SQUARE>")
     )
-  (pc-encode-utf8-string but-str encoded-but-str)
-  encoded-but-str
-  )
+  (pc-encode-utf8-string (-> this temp-but-string) (-> this temp-encoded-string))
+  (-> this temp-encoded-string)
 )
 
 (card-display-on)
