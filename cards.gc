@@ -1,3 +1,12 @@
+(define *input-cards-on?* #f)
+(define *show-stick?* #f)
+(define *ignore-click?* #f)
+
+(define *card-x-pos* 25)
+(define *card-y-pos* 10)
+
+
+
 (defun draw-string-xy-scaled ((str string) (buf dma-buffer) (x int) (y int) (color font-color) (flags font-flags) (scale float))
   "Draw a string at the given xy location, with the given scale."
   (let* ((font-ctxt (new 'stack 'font-context *font-default-matrix* x y 0.0 color flags)))
@@ -58,6 +67,7 @@
    (y-start int)
    (text-offset int)
    (include-stick? symbol)
+   (british-mode? symbol)
    (cards card-array)
    (new-input? symbol)
    (current-buttons pad-buttons)
@@ -84,6 +94,8 @@
     )
 )
 
+(define MAX_CARDS 20)
+
 ;;hat
 (defmethod relocate ((this card-display) (offset int))
   (if (nonzero? (-> this temp-encoded-string))
@@ -92,15 +104,20 @@
   (if (nonzero? (-> this temp-but-string))
       (&+! (-> this temp-but-string) offset)
       )
-  (if (nonzero? (-> this cards))
-      (&+! (-> this cards) offset)
-      )
+  (when (nonzero? (-> this cards))
+    (dotimes (i MAX_CARDS)
+      (when (nonzero? (-> this cards data i msg))
+       (&+! (-> this cards data i msg) offset))
+    )
+    (&+! (-> this cards) offset)
+  )
   (call-parent-method this offset)
   )
 
 
 (defmethod update-card-msg ((this card-display) (c card) (arg0 string))
-    (set! (-> c msg) arg0)
+    ;(set! (-> c msg) arg0)
+    (copy-string<-string (-> c msg) arg0)
     c
   )
 
@@ -122,6 +139,7 @@
 (defmethod update-top-card ((this card-display))
   (update-card-msg this (-> this cards data 0) 
     (make-button-string this (-> this current-buttons)))
+  (make-button-string this (-> this current-buttons))
   (update-card-time this (-> this cards data 0) (get-current-time))
   (update-card-dir this (-> this cards data 0) (-> this current-dir))
   (update-card-vel this (-> this cards data 0) (-> this current-vel))
@@ -187,14 +205,15 @@
 )
 
 
-(define MAX_CARDS 20)
-
 (defbehavior card-display-init-by-other card-display ()
   ;;set initial values and cards
-  (set! (-> self x-start) 22)
-  (set! (-> self y-start) 10)
+  (set! (-> self x-start) *card-x-pos*)
+  (set! (-> self y-start) *card-y-pos*)
   (set! (-> self text-offset) 15)
-  (set! (-> self include-stick?) #t)
+  
+  (set! (-> self include-stick?) *show-stick?*)
+  (set! (-> self british-mode?) *ignore-click?*)
+
   (set! (-> self new-input?) #f)
   (set! (-> self current-buttons) (the pad-buttons 0))
   (set! (-> self current-dir) 0)
@@ -207,7 +226,8 @@
   (set! (-> self cards) (new 'process 'card-array MAX_CARDS))
   ;;setup dummy cards in slots
   (dotimes (i (-> self cards length))
-    (update-card-msg self (-> self cards data i) (the string #f))
+    (set! (-> self cards data i msg) (new 'process 'string 512 (the string #f)))
+    ;(update-card-msg self (-> self cards data i) (new 'process 'string 512 (the string #f)))
     (update-card-time self (-> self cards data i) 0)
     (update-card-dir self (-> self cards data i) 0)
     (update-card-vel self (-> self cards data i) 0)
@@ -216,7 +236,7 @@
 )
 
 
-(defbehavior draw-text card-display ()
+(defbehavior card-draw-text card-display ()
   (with-dma-buffer-add-bucket ((testbuf (-> (current-frame) global-buf)) (bucket-id debug-no-zbuf1))
     (dotimes (i (-> self cards length))
       (when (> (-> self cards data i timestamp) 0)
@@ -238,29 +258,33 @@
           0.4
         )
         ;;stick pic
-        (draw-string-xy-scaled
-          (string-format "O")
-          testbuf 
-          (+ (-> self x-start) 7)
-          (- (+ (-> self y-start) (* i (-> self text-offset))) 1)
-          (the font-color 22)
-          (font-flags large kerning)
-          0.6
-        )
-        (let ((vec (vec-for-stick (-> self cards data i dir) (-> self cards data i vel))))
+        (when (-> self include-stick?)
           (draw-string-xy-scaled
-            (string-format " <" ) ;;< converts to a filled in circle
+            (string-format "O")
             testbuf 
-            (+ (the int (-> vec x)) (-> self x-start))
-            (+ (the int (-> vec y)) (-> self y-start) (* i (-> self text-offset)))
-            (the font-color (- 5 (-> self cards data i vel)))
+            (+ (-> self x-start) 7)
+            (- (+ (-> self y-start) (* i (-> self text-offset))) 1)
+            (the font-color 22)
             (font-flags large kerning)
-            0.25
+            0.6
           )
-        )
+          (let ((vec (vec-for-stick (-> self cards data i dir) (-> self cards data i vel))))
+            (draw-string-xy-scaled
+              (string-format " <" ) ;;< converts to a filled in circle
+              testbuf 
+              (+ (the int (-> vec x)) (-> self x-start))
+              (+ (the int (-> vec y)) (-> self y-start) (* i (-> self text-offset)))
+              (the font-color (- 5 (-> self cards data i vel)))
+              (font-flags large kerning)
+              0.25
+            )
+          ))
         ;;draw the message (and an L for a divider)
         (draw-string-xy-scaled
-          (string-format "l   ~s" (-> self cards data i msg))
+          (if (-> self include-stick?)  ;;hack to remove stick
+            (string-format "l   ~s" (-> self cards data i msg)) ;;spaces are surprisingly nice for aspect ratio
+            (string-format "l ~s" (-> self cards data i msg))
+          )
           testbuf 
           (-> self x-start)
           (+ (-> self y-start) (* i (-> self text-offset)))
@@ -275,10 +299,16 @@
 )
 
 (defbehavior check-button-input card-display ()
-  (when (!= (the pad-buttons (-> *cpad-list* cpads 0 button0)) (-> self current-buttons))
-    (set! (-> self current-buttons) (the pad-buttons (-> *cpad-list* cpads 0 button0)))
-    (set! (-> self new-input?) #t)
-    ;;(format #t "buttons: ~d" (-> self current-buttons))
+  (let ((but-temp (the pad-buttons (-> *cpad-list* cpads 0 button0))))
+    (when (-> self british-mode?)
+      (logclear! but-temp (pad-buttons l3))
+      (logclear! but-temp (pad-buttons r3))
+    )
+    (when (!= but-temp (-> self current-buttons))
+      (set! (-> self current-buttons) but-temp)
+      (set! (-> self new-input?) #t)
+      ;;(format #t "buttons: ~d" (-> self current-buttons))
+    )
   )
   (none)
 )
@@ -303,13 +333,24 @@
   (none)
 )
 
+(defbehavior card-settings-enforcer card-display ()
+  (set! (-> self include-stick?) *show-stick?*)
+  (set! (-> self british-mode?) *ignore-click?*)
+  (set! (-> self x-start) *card-x-pos*)
+  (set! (-> self y-start) *card-y-pos*)
+
+
+  (none)
+)
+
 
 (defstate active (card-display)
   :virtual #t
   :code (behavior ()
     (loop
 
-      (draw-text)
+      (card-settings-enforcer)
+      (card-draw-text)
       (check-button-input)
       (when (-> self include-stick?)
         (check-stick-input)
@@ -328,39 +369,36 @@
   )
 
 (defun card-display-on ()
-  ;;(set! *masher-on?* #t)
+  (set! *input-cards-on?* #t)
   (process-spawn card-display)
   (none)
 )
 
 (defun card-display-off ()
   "Kill the process"
-  ;;(set! *masher-on?* #f)
+  (set! *input-cards-on?* #f)
   (kill-by-name "card-display" *active-pool*)
+  (none)
   )
-
-(define g1 (new 'global 'string 512 (the string #f)))
-(define g2 (new 'global 'string 1024 (the string #f)))
 
 
 (defmethod make-button-string ((this card-display) (but pad-buttons))
   
     (clear (-> this temp-but-string))
     (clear (-> this temp-encoded-string))
-    (clear g1)
-    (clear g2)
 
     (when (logtest? but (pad-buttons select))
-      (cat-string<-string (-> this temp-but-string) "Sel")
+      (cat-string<-string (-> this temp-but-string) "~22L<~-10H<~-10H<~-54H~0LSel")
     )
     (when (logtest? but (pad-buttons l3))
       (cat-string<-string (-> this temp-but-string) "~22L<~-30H~0LL3")
+      ;;(cat-string<-string (-> this temp-but-string) "<FLAG_UK>")
     )
     (when (logtest? but (pad-buttons r3))
       (cat-string<-string (-> this temp-but-string) "~22L<~-30H~0LR3")
     )
     (when (logtest? but (pad-buttons start))
-      (cat-string<-string (-> this temp-but-string) "St")
+      (cat-string<-string (-> this temp-but-string) "~22L<~-12H<~-38H~0LSt")
     )
     (when (logtest? but (pad-buttons up))
       (cat-string<-string (-> this temp-but-string) "<PAD_DPAD_UP>")
@@ -377,7 +415,7 @@
     (when (logtest? but (pad-buttons l2))
       (cat-string<-string (-> this temp-but-string) "<PAD_L2>")
     )
-    (when (logtest? but (pad-buttons r2)) ;;<PAD_R2>
+    (when (logtest? but (pad-buttons r2))
       (cat-string<-string (-> this temp-but-string) "<PAD_R2>")
     )
     (when (logtest? but (pad-buttons l1))
@@ -402,4 +440,21 @@
   (-> this temp-encoded-string)
 )
 
-(card-display-on)
+
+
+(when (-> *debug-menu-context* root-menu)
+  (debug-menu-append-item (-> *debug-menu-context* root-menu)
+    (debug-menu-make-from-template *debug-menu-context*
+      '(menu "Input Cards"
+          (function "On/Off" #f ,(lambda () (if (not *input-cards-on?*) (card-display-on) (card-display-off))))
+          (flag "Show stick?" *show-stick?* dm-boolean-toggle-pick-func)
+          (flag "Ignore L3/R3?" *ignore-click?* dm-boolean-toggle-pick-func)
+          (int-var "X Pos" *card-x-pos* dm-int-var-func 0 5 #t 0 500)
+          (int-var "Y Pos" *card-y-pos* dm-int-var-func 0 5 #t 0 500)
+          (int-var "Max Cards (reload)" MAX_CARDS dm-int-var-func 0 1 #t 0 20)
+          ;(flag "Debug Font Auto-Scale" #f ,(dm-lambda-boolean-flag (-> *pc-settings* debug-font-scale-auto?)))
+          )
+      )
+    )
+)
+
